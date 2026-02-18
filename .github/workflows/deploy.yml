@@ -19,24 +19,18 @@ jobs:
           while IFS= read -r REPO_URL || [ -n "$REPO_URL" ]; do
             [[ -z "$REPO_URL" || "$REPO_URL" =~ ^# ]] && continue
             
-            # Extract clean name
             FOLDER=$(basename "$REPO_URL" .git | cut -d'?' -f1)
             echo "--- Processing: $FOLDER ---"
 
-            # Clone ONLY the latest code (no history) to GitHub's cloud disk
             git clone --depth 1 "$REPO_URL" "$FOLDER"
             cd "$FOLDER"
 
-            # Run build if package.json exists
             if [ -f "package.json" ]; then
               npm install --no-audit --no-fund
-              npm run build || echo "No build script found, skipping build..."
+              npm run build || echo "No build script found"
             fi
 
-            # Deploy to Cloudflare using folder name
-            npx wrangler deploy --name "$FOLDER" --compatibility-date 2024-01-01 || echo "Deploy failed for $FOLDER"
-            
-            # Clean up cloud disk for next repo
+            # Deploy as a Worker
+            npx wrangler deploy --name "$FOLDER" --compatibility-date 2024-01-01 || echo "Deploy failed"
             cd ..
-            rm -rf "$FOLDER"
           done < urls.txt
