@@ -15,7 +15,7 @@ jobs:
         with:
           node-version: 20
 
-      - name: Surgical Refactor Deploy
+      - name: Master Deployer
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -24,41 +24,40 @@ jobs:
           while IFS= read -r REPO_URL || [ -n "$REPO_URL" ]; do
             [[ -z "$REPO_URL" || "$REPO_URL" =~ ^# ]] && continue
             FOLDER=$(basename "$REPO_URL" .git | cut -d'?' -f1)
-            echo "--- Deploying: $FOLDER ---"
+            echo "--- Processing: $FOLDER ---"
 
             git clone --depth 1 "$REPO_URL" "$FOLDER" || continue
             cd "$FOLDER"
 
-            # 1. FIND THE REAL ROOT
+            # Fix Monorepos: find the actual root
             REAL_ROOT=$(find . -maxdepth 3 -name "wrangler.toml" -o -name "package.json" | head -n 1)
             [ -n "$REAL_ROOT" ] && cd $(dirname "$REAL_ROOT")
 
-            # 2. Build
+            # Build with Force (ignores dependency conflicts)
             if [ -f "package.json" ]; then
-              npm install --no-audit --no-fund --force || echo "Install failed"
-              npm run build || echo "Build failed"
+              npm install --no-audit --no-fund --force || echo "npm fail"
+              npm run build || echo "build fail"
             fi
 
-            # 3. Identify Entry Point
-            ENTRY=$(find . -maxdepth 2 \( -name "wrangler.toml" -o -name "index.ts" -o -name "index.js" \) | grep -E "wrangler.toml|dist/index.js|src/index.ts|index.js" | head -n 1)
+            # Find the best entry point
+            ENTRY=$(find . -maxdepth 3 \( -name "wrangler.toml" -o -name "index.ts" -o -name "index.js" -o -name "worker.js" \) | \
+                    grep -E "wrangler.toml|dist/index.js|src/index.ts|src/index.js|index.js|worker.js" | head -n 1)
 
             if [ -n "$ENTRY" ]; then
-               # Create the HEADERS
+               # Generate a V4 compatible config on the fly
                echo "name = \"$FOLDER\"" > v4-config.toml
                echo "compatibility_date = \"2024-01-01\"" >> v4-config.toml
                echo 'compatibility_flags = [ "nodejs_compat" ]' >> v4-config.toml
                
                if [[ "$ENTRY" == *"wrangler.toml"* ]]; then
-                  # REFACTOR: Fix the 'binding' vs 'name' issue found in your logs
-                  # This changes 'binding = "NAME"' to 'name = "NAME"' for Workflows/DOs
+                  # Fix old 'binding' keys to 'name' keys for Workflows/DOs
                   sed -i 's/binding = /name = /g' wrangler.toml
-                  
-                  # STRIP CONFLICTS
+                  # Strip conflicting global keys
                   grep -vE "^name|^account_id|^compatibility_date|^compatibility_flags" wrangler.toml >> v4-config.toml
-                  npx wrangler deploy --config v4-config.toml || echo "Deploy failed"
+                  npx wrangler deploy --config v4-config.toml || echo "W_FAIL"
                else
                   echo "main = \"$ENTRY\"" >> v4-config.toml
-                  npx wrangler deploy --config v4-config.toml || echo "Deploy failed"
+                  npx wrangler deploy --config v4-config.toml || echo "E_FAIL"
                fi
             fi
             
