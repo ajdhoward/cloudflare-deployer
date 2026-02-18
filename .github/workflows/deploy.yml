@@ -15,7 +15,7 @@ jobs:
         with:
           node-version: 20
 
-      - name: Subfolder-Aware Deploy
+      - name: Surgical Refactor Deploy
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -43,13 +43,17 @@ jobs:
             ENTRY=$(find . -maxdepth 2 \( -name "wrangler.toml" -o -name "index.ts" -o -name "index.js" \) | grep -E "wrangler.toml|dist/index.js|src/index.ts|index.js" | head -n 1)
 
             if [ -n "$ENTRY" ]; then
-               # Create the MANDATORY HEADERS in a fresh file
+               # Create the HEADERS
                echo "name = \"$FOLDER\"" > v4-config.toml
                echo "compatibility_date = \"2024-01-01\"" >> v4-config.toml
                echo 'compatibility_flags = [ "nodejs_compat" ]' >> v4-config.toml
                
                if [[ "$ENTRY" == *"wrangler.toml"* ]]; then
-                  # STRIP ALL POTENTIAL CONFLICTS: Remove any key we just defined above
+                  # REFACTOR: Fix the 'binding' vs 'name' issue found in your logs
+                  # This changes 'binding = "NAME"' to 'name = "NAME"' for Workflows/DOs
+                  sed -i 's/binding = /name = /g' wrangler.toml
+                  
+                  # STRIP CONFLICTS
                   grep -vE "^name|^account_id|^compatibility_date|^compatibility_flags" wrangler.toml >> v4-config.toml
                   npx wrangler deploy --config v4-config.toml || echo "Deploy failed"
                else
