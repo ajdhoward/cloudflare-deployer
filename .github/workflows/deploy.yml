@@ -1,31 +1,21 @@
 name: Bulk Deploy Workers
 on: [workflow_dispatch, push]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      # KILL SWITCH: Stop all other active runs for this workflow
-      - name: Cancel Previous Runs
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          ACTIVE_RUNS=$(gh run list --workflow "Bulk Deploy Workers" --status in_progress --json databaseId --jq '.[].databaseId')
-          for RUN_ID in $ACTIVE_RUNS; do
-            if [ "$RUN_ID" != "${{ github.run_id }}" ]; then
-              echo "Stopping old run: $RUN_ID"
-              gh run cancel "$RUN_ID" || true
-            fi
-          done
-
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: 20
 
-      - name: Repair & Deploy
+      - name: V4 Compatibility Deploy
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -34,27 +24,33 @@ jobs:
           while IFS= read -r REPO_URL || [ -n "$REPO_URL" ]; do
             [[ -z "$REPO_URL" || "$REPO_URL" =~ ^# ]] && continue
             FOLDER=$(basename "$REPO_URL" .git | cut -d'?' -f1)
-            echo "--- Repairing: $FOLDER ---"
+            echo "--- Deploying: $FOLDER ---"
 
             git clone --depth 1 "$REPO_URL" "$FOLDER" || continue
             cd "$FOLDER"
 
-            [ -f "wrangler.toml" ] && sed -i '/account_id/d' wrangler.toml
-
+            # 1. Force install dependencies even if they conflict
             if [ -f "package.json" ]; then
-              npm install --no-audit --no-fund --legacy-peer-deps || echo "Install failed"
-              # Inject common missing AI/Zod modules found in logs
-              npm install zod ai zod-to-json-schema --save-dev || echo "Optional install failed"
+              npm install --no-audit --no-fund --force || echo "Install failed"
               npm run build || echo "Build failed"
             fi
 
+            # 2. Find the entry point
             ENTRY=$(find . -maxdepth 3 \( -name "wrangler.toml" -o -name "index.ts" -o -name "index.js" \) | grep -E "wrangler.toml|dist/index.js|src/index.ts|index.js" | head -n 1)
 
             if [ -n "$ENTRY" ]; then
+               # Create a temporary config to force nodejs_compat (required by Wrangler v4)
+               echo "name = \"$FOLDER\"" > v4-config.toml
+               echo "compatibility_date = \"2024-01-01\"" >> v4-config.toml
+               echo 'compatibility_flags = [ "nodejs_compat" ]' >> v4-config.toml
+               
                if [[ "$ENTRY" == *"wrangler.toml"* ]]; then
-                  npx wrangler deploy --name "$FOLDER" --compatibility-date 2024-01-01 || true
+                  # Merge original toml with our v4 requirements
+                  grep -v "account_id" wrangler.toml >> v4-config.toml
+                  npx wrangler deploy --config v4-config.toml || echo "Deploy failed"
                else
-                  npx wrangler deploy "$ENTRY" --name "$FOLDER" --compatibility-date 2024-01-01 --node-compat || true
+                  echo "main = \"$ENTRY\"" >> v4-config.toml
+                  npx wrangler deploy --config v4-config.toml || echo "Deploy failed"
                fi
             fi
             
