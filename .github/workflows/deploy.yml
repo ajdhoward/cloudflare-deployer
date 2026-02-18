@@ -43,14 +43,14 @@ jobs:
             ENTRY=$(find . -maxdepth 2 \( -name "wrangler.toml" -o -name "index.ts" -o -name "index.js" \) | grep -E "wrangler.toml|dist/index.js|src/index.ts|index.js" | head -n 1)
 
             if [ -n "$ENTRY" ]; then
-               # Create a CLEAN temporary config
+               # Create the MANDATORY HEADERS in a fresh file
                echo "name = \"$FOLDER\"" > v4-config.toml
                echo "compatibility_date = \"2024-01-01\"" >> v4-config.toml
                echo 'compatibility_flags = [ "nodejs_compat" ]' >> v4-config.toml
                
                if [[ "$ENTRY" == *"wrangler.toml"* ]]; then
-                  # STRIP DUPLICATES: Remove name, account_id, and compat_date from the original
-                  grep -vE "name|account_id|compatibility_date" wrangler.toml >> v4-config.toml
+                  # STRIP ALL POTENTIAL CONFLICTS: Remove any key we just defined above
+                  grep -vE "^name|^account_id|^compatibility_date|^compatibility_flags" wrangler.toml >> v4-config.toml
                   npx wrangler deploy --config v4-config.toml || echo "Deploy failed"
                else
                   echo "main = \"$ENTRY\"" >> v4-config.toml
