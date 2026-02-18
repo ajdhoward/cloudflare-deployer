@@ -27,12 +27,26 @@ jobs:
 
             if [ -f "package.json" ]; then
               npm install --no-audit --no-fund
-              npm run build || echo "Build failed, attempting deploy anyway..."
+              npm run build || echo "Build failed, attempting deploy..."
             fi
 
-            # FIX: Point to the entry file (src/index.ts)
-            # We add --minify to help with size limits
-            npx wrangler deploy src/index.ts --name "$FOLDER" --compatibility-date 2024-01-01 --minify || echo "Deploy failed"
+            # AUTO-DETECT ENTRY POINT
+            ENTRY=""
+            for f in src/index.ts src/index.js index.ts index.js src/worker.ts worker.ts; do
+              if [ -f "$f" ]; then
+                ENTRY="$f"
+                break
+              fi
+            done
+
+            if [ -n "$ENTRY" ]; then
+              echo "Detected entry point: $ENTRY"
+              npx wrangler deploy "$ENTRY" --name "$FOLDER" --compatibility-date 2024-01-01 --minify || echo "Deploy failed"
+            else
+              # If no file found, try deploying the whole directory as assets (for static sites)
+              echo "No entry point found, trying asset deploy..."
+              npx wrangler deploy --name "$FOLDER" --compatibility-date 2024-01-01 --assets ./dist || echo "Final deploy attempt failed"
+            fi
             
             cd ..
           done < urls.txt
