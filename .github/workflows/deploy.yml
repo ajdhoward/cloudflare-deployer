@@ -29,29 +29,28 @@ jobs:
             git clone --depth 1 "$REPO_URL" "$FOLDER" || continue
             cd "$FOLDER"
 
-            # FIND THE REAL ROOT (Look for where the Worker code actually lives)
+            # 1. FIND THE REAL ROOT
             REAL_ROOT=$(find . -maxdepth 3 -name "wrangler.toml" -o -name "package.json" | head -n 1)
-            if [ -n "$REAL_ROOT" ]; then
-               cd $(dirname "$REAL_ROOT")
-               echo "📂 Switched to directory: $(pwd)"
-            fi
+            [ -n "$REAL_ROOT" ] && cd $(dirname "$REAL_ROOT")
 
-            # 1. Install & Build in the correct folder
+            # 2. Build
             if [ -f "package.json" ]; then
               npm install --no-audit --no-fund --force || echo "Install failed"
               npm run build || echo "Build failed"
             fi
 
-            # 2. Final Deployment
+            # 3. Identify Entry Point
             ENTRY=$(find . -maxdepth 2 \( -name "wrangler.toml" -o -name "index.ts" -o -name "index.js" \) | grep -E "wrangler.toml|dist/index.js|src/index.ts|index.js" | head -n 1)
 
             if [ -n "$ENTRY" ]; then
+               # Create a CLEAN temporary config
                echo "name = \"$FOLDER\"" > v4-config.toml
                echo "compatibility_date = \"2024-01-01\"" >> v4-config.toml
                echo 'compatibility_flags = [ "nodejs_compat" ]' >> v4-config.toml
                
                if [[ "$ENTRY" == *"wrangler.toml"* ]]; then
-                  grep -v "account_id" wrangler.toml >> v4-config.toml
+                  # STRIP DUPLICATES: Remove name, account_id, and compat_date from the original
+                  grep -vE "name|account_id|compatibility_date" wrangler.toml >> v4-config.toml
                   npx wrangler deploy --config v4-config.toml || echo "Deploy failed"
                else
                   echo "main = \"$ENTRY\"" >> v4-config.toml
