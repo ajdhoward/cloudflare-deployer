@@ -15,7 +15,7 @@ jobs:
         with:
           node-version: 20
 
-      - name: V4 Compatibility Deploy
+      - name: Subfolder-Aware Deploy
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -29,23 +29,28 @@ jobs:
             git clone --depth 1 "$REPO_URL" "$FOLDER" || continue
             cd "$FOLDER"
 
-            # 1. Force install dependencies even if they conflict
+            # FIND THE REAL ROOT (Look for where the Worker code actually lives)
+            REAL_ROOT=$(find . -maxdepth 3 -name "wrangler.toml" -o -name "package.json" | head -n 1)
+            if [ -n "$REAL_ROOT" ]; then
+               cd $(dirname "$REAL_ROOT")
+               echo "📂 Switched to directory: $(pwd)"
+            fi
+
+            # 1. Install & Build in the correct folder
             if [ -f "package.json" ]; then
               npm install --no-audit --no-fund --force || echo "Install failed"
               npm run build || echo "Build failed"
             fi
 
-            # 2. Find the entry point
-            ENTRY=$(find . -maxdepth 3 \( -name "wrangler.toml" -o -name "index.ts" -o -name "index.js" \) | grep -E "wrangler.toml|dist/index.js|src/index.ts|index.js" | head -n 1)
+            # 2. Final Deployment
+            ENTRY=$(find . -maxdepth 2 \( -name "wrangler.toml" -o -name "index.ts" -o -name "index.js" \) | grep -E "wrangler.toml|dist/index.js|src/index.ts|index.js" | head -n 1)
 
             if [ -n "$ENTRY" ]; then
-               # Create a temporary config to force nodejs_compat (required by Wrangler v4)
                echo "name = \"$FOLDER\"" > v4-config.toml
                echo "compatibility_date = \"2024-01-01\"" >> v4-config.toml
                echo 'compatibility_flags = [ "nodejs_compat" ]' >> v4-config.toml
                
                if [[ "$ENTRY" == *"wrangler.toml"* ]]; then
-                  # Merge original toml with our v4 requirements
                   grep -v "account_id" wrangler.toml >> v4-config.toml
                   npx wrangler deploy --config v4-config.toml || echo "Deploy failed"
                else
