@@ -27,10 +27,12 @@ jobs:
 
             if [ -f "package.json" ]; then
               npm install --no-audit --no-fund
-              npm run build || echo "No build script found"
+              npm run build || echo "Build failed, attempting deploy anyway..."
             fi
 
-            # Deploy as a Worker
-            npx wrangler deploy --name "$FOLDER" --compatibility-date 2024-01-01 || echo "Deploy failed"
+            # FIX: Point to the entry file (src/index.ts)
+            # We add --minify to help with size limits
+            npx wrangler deploy src/index.ts --name "$FOLDER" --compatibility-date 2024-01-01 --minify || echo "Deploy failed"
+            
             cd ..
           done < urls.txt
