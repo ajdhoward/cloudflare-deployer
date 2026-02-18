@@ -1,0 +1,42 @@
+name: Bulk Deploy Workers
+on: [workflow_dispatch, push]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Cloud-Only Build and Deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          while IFS= read -r REPO_URL || [ -n "$REPO_URL" ]; do
+            [[ -z "$REPO_URL" || "$REPO_URL" =~ ^# ]] && continue
+            
+            # Extract clean name
+            FOLDER=$(basename "$REPO_URL" .git | cut -d'?' -f1)
+            echo "--- Processing: $FOLDER ---"
+
+            # Clone ONLY the latest code (no history) to GitHub's cloud disk
+            git clone --depth 1 "$REPO_URL" "$FOLDER"
+            cd "$FOLDER"
+
+            # Run build if package.json exists
+            if [ -f "package.json" ]; then
+              npm install --no-audit --no-fund
+              npm run build || echo "No build script found, skipping build..."
+            fi
+
+            # Deploy to Cloudflare using folder name
+            npx wrangler deploy --name "$FOLDER" --compatibility-date 2024-01-01 || echo "Deploy failed for $FOLDER"
+            
+            # Clean up cloud disk for next repo
+            cd ..
+            rm -rf "$FOLDER"
+          done < urls.txt
